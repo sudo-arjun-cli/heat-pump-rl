@@ -1,6 +1,6 @@
 # 🔬 Reinforcement Learning Heat Pump Controller: Development History (v4–v16)
 
-This document provides a comprehensive history of the Reinforcement Learning (RL) Heat Pump Controller project, tracing the evolution from the initial takeover at **v4** up to the current **v16** state-of-the-art physics-constrained Contextual RL controller.
+This document provides a comprehensive history of the Reinforcement Learning (RL) Heat Pump Controller project, tracing the evolution from the initial takeover at **v4** up to the current **v16** state-of-the-art physics-constrained Contextual RL controller. All evaluation results are obtained over a winter 2026 test period (90 days, 2160 hours).
 
 ---
 
@@ -44,10 +44,11 @@ This document provides a comprehensive history of the Reinforcement Learning (RL
     *   **Stable-Baselines3 Upgrades**: Switched from `DummyVecEnv` to `SubprocVecEnv` with 4 parallel environments. Wrapped the environment with `VecNormalize` to scale observations to zero-mean and unit-variance.
     *   **Gamma & Learning Rate Tuning**: Increased `gamma` to `0.995` to extend the optimization horizon over a 24-hour cycle. Added a linear learning rate decay schedule ($3\times 10^{-4}$ down to $1\times 10^{-5}$).
     *   **Custom Logging Callback**: Added `TensorboardLoggingCallback` to stream episode costs, energy, comfort %, and cycle counts.
-*   **Results**:
-    *   The linear decay schedule successfully converged the policy, preventing control oscillations.
-    *   Comfort improved significantly to **68.2%**.
-    *   Total annual cost dropped to **€1,472.07** (additional $7.5\%$ savings vs. v5). Peak overheating dropped to $25.4^\circ\text{C}$.
+*   **Evaluation (Winter 2026 - vonovia_model)**:
+    *   **T_room range**: $19.3 - 23.9^\circ\text{C}$
+    *   **Energy / Cost**: $2,814.0\text{ kWh} \ / \ \text{€}942.42$
+    *   **Comfort / HP Cycles**: $65.9\% \ / \ 169\text{ cycles}$
+    *   *Note: This policy successfully converged and avoided major underheating, but had some overheating and boundary oscillations.*
 
 ---
 
@@ -55,88 +56,102 @@ This document provides a comprehensive history of the Reinforcement Learning (RL
 *   **What Changed from v6**:
     *   **Multi-Building Training**: Enabled domain randomization during training across all 11 buildings in `vonovia_model.py`.
     *   **One-Hot Context**: Added an 11-dimension one-hot encoded building ID vector to the observation space (growing to 69 dimensions) so the policy could distinguish between buildings.
-*   **Results**:
-    *   **Catastrophic Leaky House Freezing**: Leaky, uninsulated buildings (like Buildings 1, 3, and 4) dropped to temperatures as low as **$6.8^\circ\text{C}$**.
-    *   The agent calculated that paying the quadratic comfort penalty was cheaper than paying the massive electric bills required to heat uninsulated buildings. Well-insulated houses, however, performed excellently.
+*   **Evaluation (Winter 2026)**:
+    *   **vonovia_model**: Comfort $69.5\%$, Cost €915.77, Energy $2,757.6$ kWh, HP cycles 45.
+    *   **sfh_1919_1948_0_soc** (Leaky House): Comfort **$1.3\%$**, Cost **€6,725.48**, Energy $20,218.3$ kWh. Room temperature peaked at **$34.7^\circ\text{C}$**.
+    *   **sfh_2016_now_0_soc** (Insulated): Comfort $49.1\%$, Cost €857.63, Energy $2,592.8$ kWh.
+    *   *Note: High-loss buildings (like sfh_1919) suffered from severe underheating and wild overheating because the heat pump (max 12 kW) was physically undersized for their peak demand (up to 33 kW), polluting training gradients.*
 
 ---
 
 ### **Version 8 (Environment Sanitization)**
 *   **What Changed from v7**:
     *   **Sanitization of Training Pool**: Excluded buildings with a peak heat loss $> 12$ kW at $-10^\circ\text{C}$ ambient (transmission + ventilation losses $H_{\text{ve}} + H_{\text{tr}} > 400$ W/K) from the training set, leaving 6 physically feasible SFH buildings.
-*   **Results**:
-    *   Catastrophic freezing vanished. Across all 6 feasible buildings, the absolute minimum temperature observed was **$18.5^\circ\text{C}$**.
-    *   Comfort scores stabilized between $77.4\%$ and $91.3\%$. The slight underheating was due to the agent "riding the edge" of the 20°C boundary to shave costs.
+*   **Evaluation (Winter 2026 - 6 Feasible Buildings)**:
+    *   **vonovia_model**: Comfort $81.7\%$, Cost €903.90, Energy $2,711.3$ kWh, T_room $18.4 - 25.3^\circ\text{C}$, HP cycles 78.
+    *   **sfh_1995_2001_0_soc**: Comfort $85.6\%$, Cost €994.09, Energy $2,986.1$ kWh, T_room $19.1 - 23.4^\circ\text{C}$.
+    *   **sfh_2016_now_0_soc**: Comfort $39.4\%$, Cost €828.81, Energy $2,495.8$ kWh, T_room $17.8 - 23.2^\circ\text{C}$.
+    *   *Note: Freezing was eliminated (absolute minimum rose to 17.4°C), but comfort scores were still constrained because the underheating penalty wasn't harsh enough to prevent the agent from "riding the edge".*
 
 ---
 
 ### **Version 9 (Aggressive Asymmetric Penalty)**
 *   **What Changed from v8**:
     *   **Stricter Underheating Penalty**: Increased the underheating penalty coefficient from $-5.0$ to $-20.0$ (making underheating 4x more painful).
-*   **Results**:
-    *   Successfully pushed minimum room temperatures up to $18.9^\circ\text{C} - 19.5^\circ\text{C}$, raising comfort scores to between $87\%$ and $98\%$.
-    *   **New Issue: Rapid Cycling**: The agent avoided pre-heating because it was not directly rewarded. Instead, it toggled the compressor on and off rapidly at the $20^\circ\text{C}$ boundary (e.g., $442$ cycles over 90 days).
+*   **Evaluation (Winter 2026 - 6 Feasible Buildings)**:
+    *   **vonovia_model**: Comfort $89.9\%$, Cost €896.35, Energy $2,700.8$ kWh, HP cycles 121.
+    *   **sfh_2010_2015_0_soc**: Comfort $61.1\%$, Cost €1,048.50, Energy $3,159.6$ kWh, HP cycles 186.
+    *   **sfh_2002_2009_0_soc**: Comfort $11.7\%$, Cost €735.82, Energy $2,216.6$ kWh, HP cycles 154.
+    *   *Note: Pushed minimum room temperatures up, but comfort fell on well-insulated houses because of strict 20-22°C checks and rapid cycling at the boundaries.*
 
 ---
 
 ### **Version 10 (Pre-Heating Bonus Loophole)**
 *   **What Changed from v9**:
     *   **Pre-heating Reward**: Introduced a flat $+1.0$ comfort reward for maintaining $T_{\text{room}} \ge 20.5^\circ\text{C}$ to incentivize thermal charging and mitigate rapid cycling.
-*   **Results**:
-    *   **Reward Hacking Loophole**: The agent accumulated massive positive rewards during cheap hours, allowing it to become lazy. It was willing to accept later freezing penalties because its overall episode return remained positive. Room temperatures plummeted to $18.0^\circ\text{C}$ on Building 1.
-    *   **Reversion**: The pre-heating bonus was rejected, and the penalty-only structure of **v9** was restored.
+*   **Evaluation (Winter 2026 - 6 Feasible Buildings)**:
+    *   **vonovia_model**: Comfort $85.3\%$, Cost €875.95, Energy $2,631.3$ kWh.
+    *   **sfh_1995_2001_0_soc**: Comfort $19.8\%$, Cost €878.66, Energy $2,640.7$ kWh, HP cycles 333.
+    *   **sfh_2016_now_0_soc**: Comfort $19.9\%$, Cost €801.27, Energy $2,410.5$ kWh, HP cycles 346.
+    *   *Note: Reward Hacking Loophole. The agent accumulated massive preheating rewards during cheap hours and tolerated later freezing. Reverted to the penalty-only structure of v9.*
 
 ---
 
 ### **Version 11 (Building-Specific Radiator Capacities)**
 *   **What Changed from v10**:
     *   **Radiator Coupling Physics Fix**: Dynamically calculated building-specific radiator coupling coefficients ($H_{\text{rad\_con}}$) based on peak heat loss with a 20% oversizing factor, rather than forcing all buildings to share a single hardcoded radiator capacity.
-*   **Results**:
-    *   **Vanishing Cycling**: Proper physical coupling allowed the heat pump to transfer heat smoothly. Rapid cycling vanished (Building 2 cycles plummeted from $442$ to $96$).
-    *   Comfort scores rose above **$93.7\%$** for most buildings, with minimum temperatures tightening to the boundary.
+*   **Evaluation (Winter 2026 - 6 Feasible Buildings)**:
+    *   **vonovia_model**: Comfort **$95.7\%$**, Cost €931.39, Energy $2,801.9$ kWh, HP cycles 166.
+    *   **sfh_1984_1994_0_soc**: Comfort **$96.1\%$**, Cost €1,603.26, Energy $4,827.3$ kWh, HP cycles 29.
+    *   **sfh_2016_now_0_soc**: Comfort **$93.9\%$**, Cost €896.10, Energy $2,697.7$ kWh, HP cycles 136.
+    *   *Note: Physics fix was highly successful. Giving buildings sized radiators eliminated rapid boundary cycling. Comfort skyrocketed to 86–96% across all test targets.*
 
 ---
 
 ### **Version 13 (Random Initialization Range & 5M Steps)**
 *   **What Changed from v11**:
-    *   **Random Initialization Range**: Narrowed the random initial temperature ranges on environment reset ($T_{\text{room}} \in [18.0, 24.0]^\circ\text{C}$) to prevent the agent from wasting learning cycles in physically impossible start states.
+    *   **Random Initialization Range**: Narrowed the random initial temperature ranges on environment reset ($T_{\text{room}} \in [18.0, 24.0]^\circ\text{C}$).
     *   **5M Steps Run**: Extended training to 5 million steps to reach full policy convergence.
-*   **Results**:
-    *   **Loophole Re-emergence**: With complete convergence, the agent discovered a mathematical loophole. Because the comfort penalty was purely quadratic, dropping to $19.5^\circ\text{C}$ yielded a tiny penalty. The converged agent chose to ride the $18.5^\circ\text{C}$ boundary to aggressively trade comfort for euros.
+*   **Evaluation (Winter 2026 - 6 Feasible Buildings)**:
+    *   **vonovia_model**: Comfort $90.4\%$, Cost €877.77, Energy $2,638.4$ kWh, HP cycles 251.
+    *   **sfh_2002_2009_0_soc**: Comfort $92.2\%$, Cost €774.40, Energy $2,326.7$ kWh, HP cycles 489.
+    *   *Note: The agent fully converged on the comfort-cost trade-off. It learned to ride the bottom boundary (letting room temperature dip to 18.9°C) during high-price hours to save energy costs.*
 
 ---
 
 ### **Version 14 (Linear + Quadratic Comfort Penalty)**
 *   **What Changed from v13**:
-    *   **Linear Comfort Term**: Closed the edge-riding loophole by adding a linear term to the underheating penalty: $-20 \times |T_{\text{lower}} - T_{\text{room}}| - 20 \times (T_{\text{lower}} - T_{\text{room}})^2$. Even a $0.1^\circ\text{C}$ drop was now severely punished.
-*   **Results**:
-    *   Loophole closed. Minimum temperatures rose back to $19.3^\circ\text{C} - 19.7^\circ\text{C}$, comfort returned to $\ge 95\%$, and compressor starts stabilized at a healthy 2–3 per day.
+    *   **Linear Comfort Term**: Closed the edge-riding loophole by adding a linear term to the underheating penalty: $-20 \times |T_{\text{lower}} - T_{\text{room}}| - 20 \times (T_{\text{lower}} - T_{\text{room}})^2$.
+*   **Evaluation (Winter 2026 - 6 Feasible Buildings)**:
+    *   **vonovia_model**: Comfort **$96.2\%$**, Cost €883.33, Energy $2,657.8$ kWh, HP cycles 123.
+    *   **sfh_1984_1994_0_soc**: Comfort **$94.9\%$**, Cost €1,610.15, Energy $4,839.0$ kWh, HP cycles 115.
+    *   **sfh_2016_now_0_soc**: Comfort **$95.8\%$**, Cost €874.49, Energy $2,631.6$ kWh, HP cycles 381.
+    *   *Note: Loophole closed. Minimum temperatures rose back, comfort returned to >90% averages, and costs remained low.*
 
 ---
 
 ### **Version 15 (Contextual RL & Cascaded Pumps)**
 *   **What Changed from v14**:
-    *   **Contextual RL Transition**: Replaced the rigid building one-hot IDs with **5 physical context parameters** in the observation space:
-        1. $H_{\text{tr}}$: Envelope heat loss coefficient (normalized by $2000.0$)
-        2. $H_{\text{ve}}$: Ventilation heat loss coefficient (normalized by $1000.0$)
-        3. $c_{\text{bldg}}$: Building thermal mass (normalized by $100.0$)
-        4. $\text{area\_floor}$: Floor area (normalized by $600.0$)
-        5. $\text{num\_pumps}$: Active pump count (normalized by $5.0$)
-    *   **Multi-Family House (MFH) Integration**: Added 4 unrenovated and renovated MFH building models. Fixed a unit bug where MFH specific heat losses ($W/(\text{m}^2K)$) were fed directly into the simulator (now scaled by floor area to yield absolute $W/K$).
-    *   **Cascaded Pump Architecture**: Created a cascaded heat pump model where max electrical and thermal capacities scale with the building's required pumps (calculated dynamically in `models/__init__.py`).
-    *   **Physics Capping**: Capped the agent's requested supply temperature setpoint to the physical thermodynamic limits of the heat pump cascade in `src/simulator.py` to prevent the ODE from simulating infinite heat transfer.
-*   **Results**:
-    *   The environment sanitization filter was removed, as the cascaded pumps could heat any leaky or massive building.
-    *   The agent learned generalizable physics rather than memorizing one-hot IDs, enabling zero-shot generalization.
+    *   **Contextual RL Transition**: Replaced the building one-hot IDs with **5 physical context parameters** in the observation space ($H_{\text{tr}}, H_{\text{ve}}, c_{\text{bldg}}, \text{area\_floor}, \text{num\_pumps}$).
+    *   **Multi-Family House (MFH) Integration**: Added 4 MFH models. Fixed a unit bug where MFH specific losses ($W/(\text{m}^2K)$) were fed directly instead of scaling by area.
+    *   **Cascaded Pump Architecture**: Created a cascaded heat pump model where max electrical/thermal capacities scale dynamically with the building's required pumps.
+    *   **Physics Capping**: Capped the agent's requested supply temperature to the physical limits of the heat pump cascade in `src/simulator.py`.
+*   **Evaluation (Winter 2026)**:
+    *   **vonovia_model**: Comfort $59.9\%$, Cost €967.35, Energy $2,909.4$ kWh, HP cycles 107.
+    *   **sfh_2002_2009_0_soc**: Comfort $80.6\%$, Cost €840.40, Energy $2,522.1$ kWh.
+    *   **mfh_1919_1948_0_soc** (3 Pumps, Leaky MFH): Comfort $60.7\%$, Cost €5,379.55, Energy $16,161.2$ kWh.
+    *   *Note: Generalization was successful; the agent could heat uninslated buildings and MFHs without crashing. However, comfort fell due to the complexity of learning continuous physical relationships.*
 
 ---
 
 ### **Version 16 (SAC Network Scaling)**
 *   **What Changed from v15**:
-    *   **Policy Network Scaling**: Scaled up the SAC MLP policy network architecture from default sizes to **`[512, 512, 512]`** to handle the high-dimensional continuous physical inputs.
-    *   **Training Run**: Model was trained over 3 million steps.
-*   **Results**:
-    *   This represents the current state-of-the-art policy, yielding robust winter heat control across both SFH and MFH classes.
+    *   **Policy Network Scaling**: Scaled up the SAC MLP policy network architecture from default sizes to **`[512, 512, 512]`** to handle physical features. Trained for 3 million steps.
+*   **Evaluation (Winter 2026)**:
+    *   **vonovia_model**: Comfort **$80.8\%$**, Cost €916.28, Energy $2,755.9$ kWh, HP cycles 248.
+    *   **mfh_1919_1948_2_kfw** (1 Pump, Renovated MFH): Comfort **$92.3\%$**, Cost €1,259.04, Energy $3,784.3$ kWh.
+    *   **mfh_1919_1948_0_soc** (3 Pumps, Leaky MFH): Comfort $27.6\%$, Cost €5,703.07, Energy $17,123.7$ kWh.
+    *   *Note: Scaled network improved generalization significantly, yielding high comfort (92.3%) on renovated MFH targets, though leaky structures remain difficult.*
 
 ---
 
@@ -166,16 +181,21 @@ This document provides a comprehensive history of the Reinforcement Learning (RL
 | **v11-v13** | $20 - 22^\circ\text{C}$ | $-20.0 \times (20.0 - T_{\text{room}})^2$ | $-3.0 \times (T_{\text{room}} - 22.0)^2$ | $0.0$ | None |
 | **v14-v16** | $20 - 22^\circ\text{C}$ | $-20(20 - T) - 20(20 - T)^2$ | $-3.0 \times (T_{\text{room}} - 22.0)^2$ | $0.0$ | None |
 
-### **Table 3: Hyperparameter Progression**
+### **Table 3: Winter 2026 Evaluation Performance Comparison (`vonovia_model` Only)**
+*Evaluating the exact same building across models highlights the relative impact of our reward and physics upgrades:*
 
-| Parameter | v3 | v4 | v5 | v6 | v7-v11 | v13 | v14 | v15-v16 |
-|---|:---:|:---:|:---:|:---:|:---:|:---:|:---:|:---:|
-| **Timesteps** | 500k | 500k | 500k | 1M | 1M | 5M | 3M | 3M |
-| **Gamma ($\gamma$)** | 0.99 | 0.99 | 0.99 | 0.995 | 0.995 | 0.995 | 0.995 | 0.995 |
-| **Learning Rate** | 3e-4 | 3e-4 | 3e-4 | 3e-4 $\to$ 1e-5 | 3e-4 $\to$ 1e-5 | 3e-4 $\to$ 1e-5 | 3e-4 $\to$ 1e-5 | 3e-4 $\to$ 1e-5 |
-| **Buffer Size** | 100k | 100k | 100k | 500k | 500k | 500k | 500k | 500k |
-| **Learning Starts** | 10k | 10k | 10k | 20k | 20k | 20k | 20k | 20k |
-| **Net Architecture** | Default | Default | Default | Default | Default | Default | Default | `[512, 512, 512]` |
+| Model Version | T_room Range | Energy (kWh) | Cost (€) | Comfort % | HP Cycles | Main Upgrade / Characteristics |
+|:---:|:---:|:---:|:---:|:---:|:---:|:---|
+| **v6** | $19.3 - 23.9^\circ\text{C}$ | $2814.0$ | €942.42 | $65.9\%$ | 169 | Parallel workers, LR schedule, normalization |
+| **v7** | $17.7 - 23.6^\circ\text{C}$ | $2757.6$ | €915.77 | $69.5\%$ | 45 | Domain randomization (11 buildings, 11-hot ID) |
+| **v8** | $18.4 - 25.3^\circ\text{C}$ | $2711.3$ | €903.90 | $81.7\%$ | 78 | Sanitized environments (eliminated leaky targets) |
+| **v9** | $19.2 - 22.7^\circ\text{C}$ | $2700.8$ | €896.35 | $89.9\%$ | 121 | Aggressive asymmetric penalty ($-20.0$) |
+| **v10** | $19.4 - 22.8^\circ\text{C}$ | $2631.3$ | €875.95 | $85.3\%$ | 110 | Pre-heating comfort bonus $+1.0$ (reward hacking) |
+| **v11** | $19.8 - 22.9^\circ\text{C}$ | $2801.9$ | €931.39 | **$95.7\%$** | 166 | Dynamic radiator capacities physical sizing |
+| **v13** | $18.9 - 22.5^\circ\text{C}$ | $2638.4$ | €877.77 | $90.4\%$ | 251 | Convergence on 5M steps (riding bottom edge) |
+| **v14** | $19.1 - 22.1^\circ\text{C}$ | $2657.8$ | €883.33 | **$96.2\%$** | 123 | Linear + Quadratic comfort penalty (closed loophole) |
+| **v15** | $18.9 - 24.3^\circ\text{C}$ | $2909.4$ | €967.35 | $59.9\%$ | 107 | Contextual RL (5 physical parameter inputs) |
+| **v16** | $18.9 - 24.6^\circ\text{C}$ | $2755.9$ | €916.28 | $80.8\%$ | 248 | Contextual RL + Scaled network `[512, 512, 512]` |
 
 ---
 
